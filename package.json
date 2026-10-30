@@ -1,6 +1,6 @@
 {
   "name": "luxora-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Luxora Futsal odalarında sesli sohbet sağlayan Haxball istemcisi",
   "author": "Luxora Futsal",
   "main": "main.js",

@@ -20,6 +20,7 @@ const state = {
   rooms: [],
   bridge: false,
   me: null,
+  authKnown: false,   // oturum sorgusu döndü mü
   full: false,
 };
 
@@ -77,11 +78,13 @@ function applySnapshot(snap, bridge) {
 
 // Oda listesi ve kimlik oyun katmanına gidiyor; katman hangi odada olunduğunu
 // bununla eşleştiriyor, takım bilgisini de buradan alıyor.
+// Oturum henüz sorulmadıysa 'me' hiç gönderilmiyor: "bilinmiyor" ile
+// "çıkış yapılmış" ayrı şeyler. Eskiden açılıştaki ilk gönderim "çıkış
+// yapılmış" sayılıp mikrofon kapatılabiliyordu.
 function pushToGame() {
-  window.lux.voice.room({
-    rooms: state.rooms.map((r) => ({ id: r.id, name: r.name, players: r.players || [] })),
-    me: state.me ? state.me.nick : null,
-  });
+  const d = { rooms: state.rooms.map((r) => ({ id: r.id, name: r.name, players: r.players || [] })) };
+  if (state.authKnown) d.me = state.me ? state.me.nick : null;
+  window.lux.voice.room(d);
 }
 
 // ── Üst çubuk ────────────────────────────────────────────────────────────────
@@ -211,6 +214,7 @@ function init() {
 
   window.lux.auth.onChanged((m) => {
     state.me = m || null;
+    state.authKnown = true;
     renderAccount();
     pushToGame();
   });
@@ -244,8 +248,11 @@ function init() {
 
   // Oturum kalıcı: daha önce girdiyse sormadan devam.
   window.lux.auth.me().then((m) => {
-    if (m) { state.me = m; renderAccount(); pushToGame(); }
-  }).catch(() => {});
+    state.me = m || null;
+    state.authKnown = true;
+    renderAccount();
+    pushToGame();
+  }).catch(() => { state.authKnown = true; pushToGame(); });
 }
 
 init();

@@ -22,6 +22,24 @@ const ICE = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:1
 
 const PTT_DEFAULT = 'KeyV';
 
+// Konuşma algısı. Kısa sesler (klavye, nefes, tık) göstergede yanıp
+// sönmesin, kelime aralarında da gösterge kapanmasın: seviye yumuşatılıyor,
+// konuşma ~0,1 sn sürünce başlıyor, ~0,75 sn sessizlik olmadan bitmiyor.
+class Vad {
+  constructor(threshold) {
+    this.t = threshold; this.avg = 0; this.on = false; this.hot = 0; this.quiet = 0;
+  }
+
+  // Durum değiştiyse true döner.
+  push(level) {
+    this.avg = this.avg * 0.8 + level * 0.2;
+    if (this.avg > this.t) { this.hot += 1; this.quiet = 0; } else { this.quiet += 1; this.hot = 0; }
+    if (!this.on && this.hot >= 6) { this.on = true; return true; }
+    if (this.on && this.quiet >= 45) { this.on = false; return true; }
+    return false;
+  }
+}
+
 class VoiceEngine extends EventTarget {
   constructor() {
     super();
@@ -46,6 +64,8 @@ class VoiceEngine extends EventTarget {
     this.outputGain = 0.7;
     this.deviceId = null;
     this.testOn = false;         // kendi sesini kendine dinletme (mikrofon testi)
+    this.errorCode = null;       // denied | missing | busy | other — panel ne önereceğini buradan bilir
+    this._starting = null;       // açılmakta olan mikrofon (aynı anda iki istek tek akış açsın)
 
     this.rawStream = null;       // cihazdan gelen ham ses
     this.stream = null;          // işlenmiş ses (eşlere giden)
@@ -69,10 +89,21 @@ class VoiceEngine extends EventTarget {
 
   // ── Mikrofon ───────────────────────────────────────────────────────────────
 
-  async enableMic() {
-    if (this.micOn) return;
+  // Otomatik açılma ile oyuncunun "Sesi aç" tıklaması aynı anda gelebilir;
+  // ikisi de aynı açılışı bekler, iki ayrı mikrofon akışı açılmaz.
+  enableMic() {
+    if (this.micOn) return Promise.resolve(true);
+    if (!this._starting) this._starting = this._startMic().finally(() => { this._starting = null; });
+    return this._starting;
+  }
+
+  // Eskiden yalnızca izin isteği korunuyordu: ses yolunu kurarken çıkan bir
+  // hata mikrofonu sessizce kapalı bırakıyor, oyuncuya hiçbir şey
+  // söylenmiyordu. Artık her hata yakalanıp türüne göre anlatılıyor.
+  async _startMic() {
+    let raw = null;
     try {
-      this.rawStream = await navigator.mediaDevices.getUserMedia({
+      raw = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: this.deviceId ? { exact: this.deviceId } : undefined,
           echoCancellation: true,
@@ -81,15 +112,32 @@ class VoiceEngine extends EventTarget {
           channelCount: 1,
         },
       });
+      this.rawStream = raw;
+      this._buildGraph();
     } catch (e) {
-      this.error = e && e.name === 'NotAllowedError' ? 'izin verilmedi' : 'mikrofon açılamadı';
+      if (raw) raw.getTracks().forEach((t) => t.stop());
+      this.rawStream = null;
+      if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null; }
+      const n = e && e.name;
+      this.errorCode = n === 'NotAllowedError' || n === 'SecurityError' ? 'denied'
+        : n === 'NotFoundError' || n === 'OverconstrainedError' ? 'missing'
+        : n === 'NotReadableError' || n === 'AbortError' ? 'busy'
+        : 'other';
+      this.error = {
+        denied: 'Mikrofon izni verilmedi.',
+        missing: 'Mikrofon bulunamadı.',
+        busy: 'Mikrofon açılamadı; başka bir uygulama kullanıyor olabilir.',
+        other: 'Mikrofon açılamadı.',
+      }[this.errorCode];
+      // Seçili cihaz çıkarıldıysa (kulaklık söküldü gibi) bir dahaki sefere varsayılan denensin.
+      if (this.errorCode === 'missing' && this.deviceId) this.deviceId = null;
       this.emit('change');
-      return;
+      return false;
     }
 
-    this._buildGraph();
     this.micOn = true;
     this.error = null;
+    this.errorCode = null;
     this._startMeter();
     this._applyGate();
     this.emit('change');
@@ -97,6 +145,7 @@ class VoiceEngine extends EventTarget {
 
     // Mikrofon açılınca ağ tarafını da dene.
     this.connect();
+    return true;
   }
 
   // Ses yolu:  cihaz → kazanç → [ölçer] → eşlere giden akış
@@ -204,7 +253,7 @@ class VoiceEngine extends EventTarget {
 
   _startMeter() {
     const buf = new Uint8Array(this.analyser.frequencyBinCount);
-    let quiet = 0;
+    const vad = new Vad(0.1);
     const tick = () => {
       this.analyser.getByteTimeDomainData(buf);
       let sum = 0;
@@ -212,11 +261,7 @@ class VoiceEngine extends EventTarget {
       const rms = Math.sqrt(sum / buf.length);
       this.level = Math.min(1, rms * 6);
 
-      // Konuşma algısı: eşik üstünde anında aç, altında 400 ms bekle (kelime
-      // aralarında panelin titremesin).
-      const hot = this.level > 0.12;
-      if (hot) { quiet = 0; if (!this.speaking) { this.speaking = true; this.emit('change'); } }
-      else if (this.speaking && ++quiet > 24) { this.speaking = false; this.emit('change'); }
+      if (vad.push(this.level)) { this.speaking = vad.on; this.emit('change'); }
 
       this.emit('level');
       this._raf = requestAnimationFrame(tick);
@@ -233,6 +278,7 @@ class VoiceEngine extends EventTarget {
   // sunucu söylüyor, çünkü genel kanala kimin geçtiğini kadro bilemez.
 
   get channel() {
+    if (this.joined) return this.joined;   // sunucunun söylediği kanal
     if (this.scope === 'general') return 'general';
     const t = this.me ? this.me.team : 0;
     return t === 1 ? 'red' : t === 2 ? 'blue' : 'spec';
@@ -271,7 +317,10 @@ class VoiceEngine extends EventTarget {
     this.members = [];
     this.peers.forEach((_, n) => this._dropPeer(n));
     this.failed.clear();
-    if (this.signal && this.signal.ready) this.signal.send({ type: 'channel', channel: this.channel });
+    this.joined = null;   // yeni kanalı sunucu 'welcome' ile söyleyecek
+    if (this.signal && this.signal.ready) {
+      this.signal.send({ type: 'channel', channel: this.scope === 'general' ? 'general' : 'team' });
+    }
   }
 
   // Odadan çıkınca her şey bırakılır: bağlantılar, kadro, takım bilgisi.
@@ -333,11 +382,29 @@ class VoiceEngine extends EventTarget {
     this.state = 'connecting';
     this.emit('change');
 
-    this.signal = new Signaling(`${SIGNAL_URL}?room=${encodeURIComponent(this.room.id)}`, {
-      hello: () => ({ room: this.room.id, name: this.me.name, channel: this.channel, team: this.me.team }),
-      onReady: () => { this.state = 'live'; this.emit('change'); this._syncPeers(); },
+    // Kimliği sunucu biletle doğruluyor: istemci adını ya da takımını
+    // söylemiyor, yalnız siteden aldığı tek kullanımlık bileti sunuyor. Her
+    // bağlantı denemesi yeni bir bilet ister.
+    const roomId = this.room.id;
+    this.signal = new Signaling(`${this.signalUrl || SIGNAL_URL}?room=${encodeURIComponent(roomId)}`, {
+      hello: async () => {
+        const t = this.getToken ? await this.getToken(roomId) : null;
+        if (!t || !t.token) return { error: (t && t.error) || 'auth' };
+        return { token: t.token, channel: this.scope === 'general' ? 'general' : 'team' };
+      },
+      onReady: (w) => {
+        // Kanalı sunucu belirliyor (kadrodaki gerçek takımdan); ona uy.
+        this.joined = w.channel || null;
+        this.state = 'live'; this.emit('change'); this._syncPeers();
+      },
       onDown: (reason) => {
-        this.state = reason === 'missing' ? 'no-server' : 'connecting';
+        this.state = reason === 'missing' ? 'no-server'
+          : reason === 'not-in-room' ? 'no-name'
+          : reason === 'auth' ? 'no-auth'
+          : reason === 'update' ? 'update'
+          : reason === 'replaced' ? 'replaced'
+          : 'connecting';
+        this.joined = null;
         this.members = [];
         this.peers.forEach((_, n) => this._dropPeer(n));
         this.emit('change');
@@ -447,16 +514,15 @@ class VoiceEngine extends EventTarget {
       an.fftSize = 256; an.smoothingTimeConstant = 0.7;
       src.connect(an);
       const buf = new Uint8Array(an.frequencyBinCount);
-      let quiet = 0;
+      // Karşıdan gelen ses sıkıştırılmış olarak gelir, biraz daha alçak: eşik düşük.
+      const vad = new Vad(0.08);
       const tick = () => {
         if (!this.peers.has(name)) return;
         an.getByteTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
         const lvl = Math.min(1, Math.sqrt(sum / buf.length) * 6);
-        const hot = lvl > 0.1;
-        if (hot) { quiet = 0; if (!p.speaking) { p.speaking = true; this.emit('peers'); } }
-        else if (p.speaking && ++quiet > 20) { p.speaking = false; this.emit('peers'); }
+        if (vad.push(lvl)) { p.speaking = vad.on; this.emit('peers'); }
         requestAnimationFrame(tick);
       };
       tick();
@@ -536,6 +602,14 @@ class VoiceEngine extends EventTarget {
 // Yalnızca "kiminle bağlanacağım" trafiği taşır; ses buradan geçmez.
 // Uç yayında değilken sessizce "missing" durumuna düşer, panel bunu yazar.
 
+// Sunucunun kapanış kodları (server/voice.js ile aynı).
+const CLOSE_REASON = {
+  4003: 'replaced',      // aynı hesap başka yerden bağlandı
+  4004: 'not-in-room',   // hesap odanın kadrosunda yok
+  4005: 'auth',          // bilet geçersiz / süresi doldu
+  4010: 'update',        // istemci eski
+};
+
 class Signaling {
   constructor(url, h) {
     this.url = url; this.h = h;
@@ -548,25 +622,34 @@ class Signaling {
     let ws;
     try { ws = new WebSocket(this.url); } catch { return this._down('missing'); }
     this.ws = ws;
+    let reason = null;
 
-    ws.onopen = () => {
-      this.opened = true; this.tries = 0;
-      ws.send(JSON.stringify({ type: 'hello', ...this.h.hello() }));
+    ws.onopen = async () => {
+      this.opened = true;
+      const hello = await this.h.hello();
+      if (this.ws !== ws || this.dead) return;
+      if (hello.error) { reason = 'auth'; try { ws.close(); } catch {} return; }
+      ws.send(JSON.stringify({ type: 'hello', ...hello }));
     };
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
-      if (m.type === 'welcome') { this.ready = true; this.h.onReady(); return; }
+      if (m.type === 'welcome') { this.ready = true; this.tries = 0; this.h.onReady(m); return; }
       this.h.onMessage(m);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       this.ready = false;
+      reason = CLOSE_REASON[ev && ev.code] || reason;
       // "Sunucu yok" yalnızca soket HİÇ açılamadıysa doğrudur. Açılıp sonra
-      // kapandıysa sunucu ayakta, sorun başka yerde — ikisini karıştırmak
-      // yanlış teşhise götürüyordu.
-      this._down(this.opened ? 'retry' : 'missing');
+      // kapandıysa sunucu ayakta, sorun başka yerde.
+      this._down(reason || (this.opened ? 'retry' : 'missing'));
       if (this.dead) return;
+      // Eski istemci ya da başka cihazdan devralma: tekrar denemek boşuna,
+      // iki cihaz birbirini sırayla düşürürdü.
+      if (reason === 'update' || reason === 'replaced') return;
       this.tries += 1;
-      setTimeout(() => this.open(), Math.min(2000 * this.tries, 20000));
+      // Odada değilse ya da bilet alınamadıysa daha seyrek dene.
+      const slow = reason === 'not-in-room' || reason === 'auth';
+      setTimeout(() => this.open(), Math.min((slow ? 5000 : 2000) * this.tries, 30000));
     };
     ws.onerror = () => { try { ws.close(); } catch {} };
   }

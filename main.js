@@ -15,6 +15,13 @@ const { app, BrowserWindow, WebContentsView, ipcMain, shell, session, net, Menu,
 // Mac'te pencere düğmeleri (sol üstteki üç nokta) işletim sisteminin; Windows
 // ve Linux'ta kendi düğmelerimiz çiziliyor.
 const IS_MAC = process.platform === 'darwin';
+
+// FPS: Haxball tarayıcının kare döngüsüyle çiziyor, o da ekranın yenileme
+// hızıyla sınırlı (300 Hz ekranda 300 FPS). Tarayıcılarda kullanılan
+// `disable-frame-rate-limit` / `disable-gpu-vsync` anahtarları bu Electron
+// sürümünde DENENDİ ve oyunu bozdu: ikisi birden 58 FPS'e düşürdü, yalnız
+// birincisi oyunu hiç çizdirmedi. Eklemeyin. Kaldırılabilen tek sınır
+// Haxball'un kendi ayarı; o game-preload.js'te sıfırlanıyor.
 const path = require('path');
 
 // Odalarımızın linkleri luxorafutsal.com'dan geliyor; oyun ise haxball.com'da
@@ -194,6 +201,14 @@ ipcMain.on('voice:room', async (_e, data) => {
 
 ipcMain.on('voice:status', (_e, s) => send('voice:status', s));
 
+// Ses bileti: ses sunucusu kimliği ve adı bundan öğreniyor. Oturum çerezi
+// yalnız ana süreçte olduğu için isteği ana süreç atıyor.
+ipcMain.handle('voice:token', async (_e, room) => {
+  const r = await api(`/voice/token?room=${encodeURIComponent(String(room || ''))}`);
+  if (r.status === 200 && r.data && r.data.token) return { token: r.data.token };
+  return { error: (r.data && r.data.error) || (r.status === 401 ? 'auth' : 'server') };
+});
+
 // Üst çubuktaki "Giriş yap": form oyunun üstündeki katmanda açılıyor, çünkü
 // kabuğun çizdiği hiçbir şey oyun görünümünün üstüne çıkamaz.
 ipcMain.on('voice:login', () => {
@@ -322,6 +337,12 @@ ipcMain.handle('auth:logout', async () => {
 });
 
 ipcMain.handle('app:info', () => ({ site: SITE, version: app.getVersion(), platform: process.platform }));
+
+// Mikrofon izni kapalıysa paneldeki "Ayarları aç" doğrudan ilgili sayfayı açar.
+ipcMain.on('open:mic-settings', () => {
+  if (process.platform === 'win32') shell.openExternal('ms-settings:privacy-microphone');
+  else if (IS_MAC) shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+});
 
 ipcMain.on('open:external', (_e, url) => {
   if (/^https:\/\//.test(String(url))) shell.openExternal(url);

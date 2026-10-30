@@ -18,10 +18,15 @@ const { ipcRenderer } = require('electron');
 const { VoiceEngine } = require('./voice');
 
 const voice = new VoiceEngine();
+voice.getToken = (room) => ipcRenderer.invoke('voice:token', room);
+const IS_MAC = process.platform === 'darwin';
+const IS_LINUX = process.platform === 'linux';
 
 const POS_KEY = 'lux.voice.pos';
 const OFF_KEY = 'lux.voice.userOff';   // oyuncu sesi kendisi kapattıysa: otomatik açma
 const SCOPE_KEY = 'lux.voice.scope';   // özel / genel tercihi
+const CONSENT_KEY = 'lux.voice.consent'; // oyuncu mikrofona bir kez izin verdi mi
+const NICK_KEY = 'lux.lastNick';         // son giriş yapılan kullanıcı adı
 
 const CHANNEL_NAME = { red: 'Kırmızı takım', blue: 'Mavi takım', spec: 'İzleyiciler', general: 'Genel sohbet' };
 
@@ -217,8 +222,11 @@ kbd.wait { color: var(--warn); border-color: rgba(245,184,75,.4); }
 .talker {
   display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 4px;
   background: rgba(20, 19, 27, .88); border: 1px solid var(--line); border-radius: 99px;
-  box-shadow: 0 4px 14px rgba(0,0,0,.35); animation: tIn .15s ease;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35); animation: tIn .22s ease-out;
+  transition: opacity .3s ease, transform .3s ease;
 }
+/* Konuşma bitince kutu birden kaybolmasın, yavaşça sönsün. */
+.talker.out { opacity: 0; transform: translateX(-8px); }
 .talker .av { width: 22px; height: 22px; box-shadow: 0 0 0 2px var(--ok); }
 .talker .tn { font-size: 12.5px; font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .talker .eq { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
@@ -226,7 +234,25 @@ kbd.wait { color: var(--warn); border-color: rgba(245,184,75,.4); }
 .talker .eq i:nth-child(2) { animation-delay: .15s; }
 .talker .eq i:nth-child(3) { animation-delay: .3s; }
 @keyframes eq { 0%, 100% { height: 3px; } 50% { height: 12px; } }
-@keyframes tIn { from { opacity: 0; transform: translateX(-6px); } }
+@keyframes tIn { from { opacity: 0; transform: translateX(-8px); } }
+
+/* İlk kez: uygulama içi mikrofon izni isteği */
+.ask { width: 300px; padding: 14px; }
+.ask-top { display: flex; gap: 12px; margin-bottom: 12px; }
+.ask-ic {
+  width: 34px; height: 34px; flex: none; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(139,108,255,.16); color: var(--accent);
+}
+.ask-ic svg { width: 16px; height: 16px; }
+.ask b { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 3px; }
+.ask p { font-size: 12px; color: var(--muted); line-height: 1.45; }
+.ask-acts { display: flex; gap: 8px; }
+.ask-acts .btn { flex: 1; }
+
+.cap-txt .err { color: var(--red); }
+.errbox { padding: 10px 12px; margin-bottom: 10px; border-radius: 8px; background: rgba(255,107,90,.1); }
+.errbox p { font-size: 12px; color: #ffc2b8; line-height: 1.45; }
+.errbox .acts { display: flex; gap: 6px; margin-top: 8px; }
 
 /* ── Uyarı (Luxora dışı oda) ────────────────────────────────────────────── */
 .toast {
@@ -282,6 +308,9 @@ const STATUS = {
   off: ['Kapalı', ''],
   'no-name': ['Adın eşleşmiyor', 'warn'],
   'no-server': ['Sunucuya ulaşılamıyor', 'bad'],
+  'no-auth': ['Giriş doğrulanamadı', 'bad'],
+  update: ['Güncelleme gerekli', 'bad'],
+  replaced: ['Başka yerde açık', 'warn'],
   connecting: ['Bağlanıyor', 'warn'],
   live: ['Canlı', 'live'],
 };
@@ -317,7 +346,6 @@ function build() {
     host, root,
     dock: root.querySelector('.dock'),
     talkers: root.querySelector('.talkers'),
-    talkKey: '',
     toast: root.querySelector('.toast'),
     veil: root.querySelector('.veil'),
     open: false, pickKey: false, idle: 0, toastT: 0, devs: [],
@@ -403,17 +431,35 @@ function onLeave() {
 }
 
 // Luxora odasında ses kendiliğinden açılır. Bas-konuş kipinde başladığı için
-// tuşa basılmadıkça hiçbir ses gönderilmez. Oyuncu sesi kendisi kapattıysa
-// tercihine saygı gösterilir.
+// tuşa basılmadıkça hiçbir ses gönderilmez. Mikrofon ilk kez açılmadan önce
+// oyuncuya uygulama içinde sorulur (Windows'ta işletim sistemi sormuyor;
+// sormadan açmak doğru değil). Bir kez izin verince bir daha sorulmaz.
+// Oyuncu sesi kendisi kapattıysa tercihine saygı gösterilir.
 function activate() {
   const r = where.room;
   voice.scope = savedScope();
   voice.setRoom({ id: r.id, name: r.name }, r.players || []);
   if (!data.me) { render(); return; }
   voice.setIdentity(data.me);
-  if (!userOff() && !voice.micOn) voice.enableMic().then(loadDevices);
+  if (consent() !== 'yes') {
+    if (!ui.declined) ui.ask = true;
+  } else if (!userOff() && !voice.micOn) {
+    startMic();
+  }
   render();
 }
+
+// Açılamazsa panel kendiliğinden açılır: oyuncu ne olduğunu ve ne
+// yapacağını görsün, "neden çalışmıyor" diye kalmasın.
+async function startMic() {
+  const ok = await voice.enableMic();
+  if (ok) loadDevices();
+  else if (ui) { ui.open = true; render(); }
+  return ok;
+}
+
+const consent = () => { try { return localStorage.getItem(CONSENT_KEY); } catch { return null; } };
+const setConsent = (v) => { try { localStorage.setItem(CONSENT_KEY, v); } catch {} };
 
 function stopVoice() {
   if (voice.micOn) voice.disableMic();
@@ -447,26 +493,37 @@ function render() {
   renderLogin();
 }
 
-// Sol üst: şu an konuşanlar. Kendin konuşurken (bas-konuş basılıyken ya da
-// açık kipte sesin geçerken) "Sen" olarak en üstte görünürsün.
+// Sol üst: şu an konuşan takım/kanal arkadaşları. Kendi adın burada yok —
+// kendi konuştuğunu mikrofon düğmesinin yeşil yanmasından görüyorsun.
+// Kutular tek tek eklenip çıkarılıyor: biri susunca yalnız onunki yavaşça
+// söner, diğerleri yerinden oynamaz.
 function renderTalkers() {
-  const list = [];
+  const want = new Map();
   if (where.room) {
-    if (voice.transmitting) list.push({ name: 'Sen', team: voice.me ? voice.me.team : 0 });
     for (const m of voice.teammates()) {
       const p = voice.peers.get(m.name);
-      if (p && p.speaking && !p.muted) list.push(m);
+      if (p && p.speaking && !p.muted) want.set(m.name, m);
     }
   }
-  const key = list.map((m) => `${m.name}:${m.team}`).join('|');
-  if (key === ui.talkKey) return;   // değişmediyse dokunma: animasyon baştan başlamasın
-  ui.talkKey = key;
-  ui.talkers.innerHTML = list.map((m) => `
-    <div class="talker">
+  for (const el of Array.from(ui.talkers.children)) {
+    if (want.has(el._name)) {
+      el.classList.remove('out');
+      want.delete(el._name);
+    } else if (!el.classList.contains('out')) {
+      el.classList.add('out');
+      setTimeout(() => { if (el.classList.contains('out')) el.remove(); }, 320);
+    }
+  }
+  for (const m of want.values()) {
+    const el = document.createElement('div');
+    el.className = 'talker';
+    el._name = m.name;
+    el.innerHTML = `
       <span class="av t${m.team || 0}">${initial(m.name)}</span>
       <span class="tn">${esc(m.name)}</span>
-      <span class="eq"><i></i><i></i><i></i></span>
-    </div>`).join('');
+      <span class="eq"><i></i><i></i><i></i></span>`;
+    ui.talkers.appendChild(el);
+  }
 }
 
 function renderDock() {
@@ -474,12 +531,33 @@ function renderDock() {
   ui.dock.hidden = !show;
   if (!show) { ui.dock.innerHTML = ''; return; }
 
+  if (ui.ask && data.me) {
+    ui.dock.innerHTML = `
+      <div class="pane ask">
+        <div class="ask-top">
+          <span class="ask-ic">${I.mic}</span>
+          <div>
+            <b>Sesli sohbet açılsın mı?</b>
+            <p>Takım arkadaşlarınla konuşmak için mikrofonuna erişmemiz gerekiyor.
+               Bas-konuş tuşuna (${esc(keyLabel(voice.pttKey))}) basmadıkça hiçbir ses gönderilmez.</p>
+          </div>
+        </div>
+        <div class="ask-acts">
+          <button class="btn" data-act="ask-no" tabindex="-1">Şimdi değil</button>
+          <button class="btn primary" data-act="ask-yes" tabindex="-1">Mikrofona izin ver</button>
+        </div>
+      </div>`;
+    bind(ui.dock);
+    return;
+  }
+
   const mates = voice.teammates();
   const speaking = mates.filter((m) => { const p = voice.peers.get(m.name); return p && p.speaking; });
   const [stTxt, stCls] = STATUS[voice.state] || STATUS.off;
 
   let capTxt;
   if (!data.me) capTxt = 'Ses için <b>giriş yap</b>';
+  else if (!voice.micOn && voice.error) capTxt = `<span class="err">${esc(voice.error)}</span>`;
   else if (!voice.micOn) capTxt = 'Ses kapalı';
   else if (voice.state === 'live') capTxt = speaking.length ? '' : `${CHANNEL_NAME[voice.channel]} · <b>${mates.length + 1}</b>`;
   else capTxt = stTxt;
@@ -522,6 +600,7 @@ function bodyHtml(stTxt, stCls, mates) {
         <div><div class="title">Sesli sohbet</div><div class="room">${esc(where.room.name)}</div></div>
         <span class="badge ${voice.micOn ? stCls : ''}">${voice.micOn ? stTxt : 'Kapalı'}</span>
       </div>
+      ${errorBox()}
       ${stateNote()}
       <div class="scope">
         <button data-act="scope" data-v="team" tabindex="-1" class="${voice.scope !== 'general' ? 'on' : ''}">
@@ -573,13 +652,33 @@ function bodyHtml(stTxt, stCls, mates) {
       <p class="note">${voice.testOn
         ? 'Kendi sesini duyuyorsun. Hoparlörle uğultu yapar; kulaklık tak.'
         : 'Konuşurken çubuk çizgiyi geçiyorsa mikrofonun duyuluyor.'}</p>
-      ${voice.error ? `<p class="note err">${esc(voice.error)}</p>` : ''}
     </div>
 
     <div class="sec">
       <button class="btn wide ${voice.micOn ? 'danger' : 'primary'}" data-act="mic" tabindex="-1">
         ${voice.micOn ? 'Sesi kapat' : 'Sesi aç'}
       </button>
+    </div>
+  </div>`;
+}
+
+// Mikrofon açılamadıysa ne olduğunu ve ne yapılacağını söyle.
+function errorBox() {
+  if (voice.micOn || !voice.error) return '';
+  const hint = {
+    denied: IS_MAC
+      ? 'Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon bölümünden Luxora Futsal\'a izin ver.'
+      : 'Windows Ayarları → Gizlilik → Mikrofon bölümünde "Masaüstü uygulamalarının mikrofona erişmesine izin ver" açık olmalı.',
+    missing: 'Bilgisayara bağlı bir mikrofon bulunamadı. Kulaklığını takıp tekrar dene.',
+    busy: 'Mikrofonu kullanan başka bir uygulamayı (Discord gibi) kapatıp tekrar dene; ya da aşağıdan başka bir mikrofon seç.',
+    other: 'Tekrar dene; olmazsa aşağıdan başka bir mikrofon seç.',
+  }[voice.errorCode] || '';
+  const settings = voice.errorCode === 'denied' && !IS_LINUX
+    ? '<button class="btn" data-act="settings" tabindex="-1">Ayarları aç</button>' : '';
+  return `<div class="errbox">
+    <p><b>${esc(voice.error)}</b> ${esc(hint)}</p>
+    <div class="acts">
+      <button class="btn primary" data-act="retry" tabindex="-1">Tekrar dene</button>${settings}
     </div>
   </div>`;
 }
@@ -591,6 +690,15 @@ function stateNote() {
     const hx = haxNick();
     return `<p class="note" style="margin-bottom:10px">Hesabın <b>${esc(data.me)}</b>${hx ? `, Haxball'daki adın <b>${esc(hx)}</b>` : ''}.
       İkisi aynı olmalı; Haxball'da adını hesabınla aynı yapıp odaya yeniden gir.</p>`;
+  }
+  if (voice.state === 'update') {
+    return '<p class="note" style="margin-bottom:10px">Sesli sohbet için uygulamanın yeni sürümü gerekiyor. luxorafutsal.com\'dan ya da GitHub\'dan indir.</p>';
+  }
+  if (voice.state === 'replaced') {
+    return '<p class="note" style="margin-bottom:10px">Hesabın sesli sohbete başka bir yerden bağlandı. Buradan konuşmak için sesi kapatıp yeniden aç.</p>';
+  }
+  if (voice.state === 'no-auth') {
+    return '<p class="note" style="margin-bottom:10px">Oturumun doğrulanamadı. Çıkış yapıp yeniden giriş yap.</p>';
   }
   if (voice.state === 'no-server') {
     return '<p class="note" style="margin-bottom:10px">Ses sunucusuna ulaşılamıyor. İnternetin kesilmiş olabilir; yeniden deneniyor.</p>';
@@ -652,7 +760,7 @@ function renderLogin() {
     <form class="card" autocomplete="off">
       <h2>Giriş yap</h2>
       <p>Sesli sohbet, Luxora odalarında takım arkadaşlarınla konuşmanı sağlar. Oyunda kullandığın hesapla gir.</p>
-      <label class="field"><span>Kullanıcı adı</span><input name="nick" maxlength="40" spellcheck="false" autocomplete="off"></label>
+      <label class="field"><span>Kullanıcı adı</span><input name="nick" maxlength="40" spellcheck="false" autocomplete="off" value="${esc(lastNick())}"></label>
       <label class="field"><span>Şifre</span><input name="pass" type="password" maxlength="64" autocomplete="off"></label>
       <p class="err" hidden></p>
       <div class="acts">
@@ -664,7 +772,11 @@ function renderLogin() {
   const form = ui.veil.querySelector('form');
   form.addEventListener('submit', onLoginSubmit);
   bind(ui.veil);
-  setTimeout(() => { const i = form.querySelector('[name=nick]'); if (i) i.focus(); }, 30);
+  // Ad zaten doluysa imleç doğrudan şifreye gitsin.
+  setTimeout(() => {
+    const nick = form.querySelector('[name=nick]');
+    (nick && nick.value ? form.querySelector('[name=pass]') : nick).focus();
+  }, 30);
 }
 
 async function onLoginSubmit(e) {
@@ -689,8 +801,15 @@ async function onLoginSubmit(e) {
   // Kabuk da haberdar oluyor (ana süreç bildiriyor); kimlik bir sonraki
   // canlı veriyle de gelecek ama beklemeden devam ediyoruz.
   data.me = r.me.nick;
+  try { localStorage.setItem(NICK_KEY, r.me.nick); } catch {}
   closeLogin();
   if (where.room) activate();
+}
+
+// Ad kutusu: önce son giriş yapılan ad, yoksa Haxball'da seçili ad (hesapla
+// aynı olması gerekiyor zaten).
+function lastNick() {
+  try { return localStorage.getItem(NICK_KEY) || haxNick(); } catch { return haxNick(); }
 }
 
 function openLogin() { build(); ui.login = true; ui.loginErr = ''; renderLogin(); }
@@ -739,8 +858,12 @@ async function onAction(e) {
     case 'toast-x': hideToast(); break;
     case 'mic':
       if (voice.micOn) { setUserOff(true); voice.disableMic(); }
-      else { setUserOff(false); await voice.enableMic(); loadDevices(); }
+      else { setConsent('yes'); setUserOff(false); ui.ask = false; await startMic(); }
       break;
+    case 'ask-yes': setConsent('yes'); setUserOff(false); ui.ask = false; render(); await startMic(); break;
+    case 'ask-no': ui.ask = false; ui.declined = true; render(); break;
+    case 'retry': await startMic(); break;
+    case 'settings': ipcRenderer.send('open:mic-settings'); break;
     case 'mode': voice.setMode(v); break;
     case 'scope':
       try { localStorage.setItem(SCOPE_KEY, v === 'general' ? 'general' : 'team'); } catch {}
@@ -902,7 +1025,9 @@ ipcRenderer.on('voice:room', (_e, d) => {
   if (!d) return;
   data.rooms = Array.isArray(d.rooms) ? d.rooms : [];
   const wasMe = data.me;
-  data.me = d.me || null;
+  // Kabuk açılışta oturumu henüz bilmiyorsa 'me' göndermiyor. Eskiden bu
+  // boşluk "çıkış yapıldı" sanılıp mikrofon kapatılıyordu.
+  if ('me' in d) data.me = d.me || null;
   if (d.ice) voice.setIce(d.ice);
 
   if (where.inRoom && where.name && isLuxoraName(where.name)) {
@@ -947,6 +1072,11 @@ function report() {
 if (process.env.LUX_DEV) {
   window.__lux = { voice, render, ui: () => ui, build, where, data, onEnter, onLeave, toast, openLogin };
 }
+
+// Haxball'un kendi FPS sınırı (oyunun ayarlarında). Sıfır "sınırsız" demek:
+// oyun ekranın yenileme hızı kadar çizer (300 Hz ekranda 300 FPS). Oyun bu
+// ayarı açılışta okuduğu için sayfanın betiklerinden önce, burada sıfırlanıyor.
+try { localStorage.setItem('fps_limit', '0'); } catch {}
 
 function start() {
   build();

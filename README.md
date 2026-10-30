@@ -137,9 +137,27 @@ export default {
 `wrangler.jsonc`:
 
 ```jsonc
-"durable_objects": { "bindings": [{ "name": "VOICE", "class_name": "VoiceRoom" }] },
+"durable_objects": { "bindings": [
+  { "name": "VOICE", "class_name": "VoiceRoom" },
+  { "name": "HUB", "class_name": "Hub" }
+] },
 "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VoiceRoom"] }]
 ```
+
+**Kimlik doğrulaması.** Ses sunucusu istemciye hiçbir konuda güvenmez. Bağlanan
+istemci, sitenin giriş yapmış oyuncuya verdiği **tek kullanımlık, 60 saniyelik
+bir ses biletiyle** gelir (`GET /voice/token?room=<oda>`). Sunucu adı ve takımı
+bu biletten ve odanın canlı kadrosundan öğrenir; özel kanal her zaman kadrodaki
+gerçek takımdan türetilir. Bunun için `HUB` bağlamasının üç iç yolu cevaplaması
+gerekir (dışarıya açık olmamalı):
+
+| Yol (POST) | Gövde | Cevap |
+|---|---|---|
+| `/__voice/verify` | `{ token, room }` | `{ ok, nick, team }` — bilet tek kullanımlık, oda eşleşmeli, hesap kadroda olmalı |
+| `/__voice/team` | `{ room, nick }` | `{ ok, team }` |
+| `/__voice/roster` | `{ room }` | `{ ok, players: [{ key, team }] }` — `key` küçük harfli ad |
+
+`team`: 0 izleyici, 1 kırmızı, 2 mavi.
 
 ## Lisans
 
