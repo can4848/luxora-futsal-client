@@ -1,0 +1,133 @@
+/* Luxora istemci — kabuk.
+   Kabuk bilerek sade: ekranın neredeyse tamamı oyun. Burada yalnızca ince bir
+   üst çubuk ve açılış var. Tek vurgu rengi, düz yüzeyler, sistem yazı tipi. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b0a10;
+  --bar: #111018;
+  --line: rgba(255, 255, 255, .07);
+  --text: #f2f1f5;
+  --muted: #a19eae;
+  --dim: #6e6b7b;
+  --accent: #8b6cff;
+  --ok: #3ecf8e;
+  --warn: #f5b84b;
+  --red: #ff6b5a;
+  --h: 44px;
+  /* Her platformun kendi arayüz yazısı: Windows'ta Segoe, Mac'te SF, Linux'ta
+     dağıtımın varsayılanı. */
+  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, "Ubuntu", "Cantarell", sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.4;
+  overflow: hidden; user-select: none; -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+img, video, svg { display: block; }
+[hidden] { display: none !important; }
+
+/* ── Üst çubuk ───────────────────────────────────────────────────────────── */
+
+.bar {
+  position: fixed; inset: 0 0 auto 0; height: var(--h); z-index: 10;
+  display: flex; align-items: center; gap: 16px; padding-left: 14px;
+  background: var(--bar); border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+.bar button, .bar .acct, .bar .live, .bar .voice-pill { -webkit-app-region: no-drag; }
+.drag { flex: 1; align-self: stretch; }
+
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 13px; }
+.brand img { width: 22px; height: 22px; object-fit: contain; }
+
+.live { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.live b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.off { background: var(--red); }
+.dot.tx { box-shadow: 0 0 0 3px rgba(62, 207, 142, .25); }
+
+.voice-pill {
+  display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px;
+  border-radius: 99px; background: rgba(255,255,255,.05); font-size: 12px; color: var(--muted);
+}
+.voice-pill b { color: var(--text); font-weight: 600; }
+
+.acct { display: flex; align-items: center; }
+.who { display: flex; align-items: center; gap: 8px; }
+.av {
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  background: #262433; color: var(--text); font-size: 11px; font-weight: 700;
+}
+.nick { font-size: 12.5px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-link { font-size: 12px; color: var(--dim); padding: 4px 6px; border-radius: 6px; }
+.btn-link:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.btn-ghost {
+  height: 28px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+  background: var(--accent); color: #fff;
+}
+.btn-ghost:hover { background: #9a7fff; }
+
+.icon-btn { width: 32px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
+.icon-btn:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.icon-btn svg { width: 15px; height: 15px; }
+
+.win { display: flex; align-self: stretch; margin-left: -6px; }
+.win button { width: 46px; display: grid; place-items: center; color: var(--muted); }
+.win button:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.win button.x:hover { background: #c42b1c; color: #fff; }
+.win svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.2; }
+
+/* ── Oyun alanı ──────────────────────────────────────────────────────────── */
+
+#app { position: fixed; inset: var(--h) 0 0 0; }
+.stage { position: absolute; inset: 0; background: var(--bg); }
+.stage-msg {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px; color: var(--muted);
+}
+.spin {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.1); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn {
+  height: 32px; padding: 0 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+  background: rgba(255,255,255,.06); border: 1px solid var(--line);
+}
+.btn:hover { background: rgba(255,255,255,.1); }
+
+/* Mac: pencere düğmeleri işletim sisteminin (sol üstteki üç nokta). Onlara
+   yer açılıyor, bizim düğmelerimiz gizleniyor. */
+body.os-darwin .bar { padding-left: 84px; }
+body.os-darwin .win { display: none; }
+body.os-darwin .bar > .icon-btn:last-of-type { margin-right: 10px; }
+
+/* Tam ekran: çubuk gizlenir, oyun ekranın tamamını kaplar. */
+body.full .bar { display: none; }
+body.full #app { inset: 0; }
+
+/* ── Açılış ──────────────────────────────────────────────────────────────── */
+
+.intro { position: fixed; inset: 0; z-index: 20; background: #000; transition: opacity .45s ease; }
+.intro.out { opacity: 0; pointer-events: none; }
+.intro video { width: 100%; height: 100%; object-fit: cover; }
+.skip {
+  position: absolute; right: 24px; bottom: 24px; height: 32px; padding: 0 16px;
+  border-radius: 99px; font-size: 12.5px; color: rgba(255,255,255,.8);
+  background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.18); backdrop-filter: blur(8px);
+  opacity: 0; animation: fadeIn .4s ease 1s forwards;
+}
+.skip:hover { color: #fff; background: rgba(0,0,0,.6); }
+@keyframes fadeIn { to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

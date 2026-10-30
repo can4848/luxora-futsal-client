@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; media-src 'self';
+               style-src 'self' 'unsafe-inline';
+               connect-src https://luxorafutsal.com wss://luxorafutsal.com;
+               script-src 'self'">
+<title>Luxora Futsal</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- Üst çubuk. Altındaki her şeyi oyun görünümü kaplıyor; bu yüzden burada
+     açılır menü yok — çubuğun dışına taşan hiçbir şey görünmezdi. -->
+<header class="bar">
+  <div class="brand">
+    <img src="../assets/emblem.webp" alt="">
+    <span>Luxora Futsal</span>
+  </div>
+
+  <div class="live" id="live" hidden>
+    <span class="dot" id="live-dot"></span>
+    <span id="live-txt"></span>
+  </div>
+
+  <div class="drag"></div>
+
+  <div class="voice-pill" id="vpill" hidden>
+    <span class="dot" id="vdot"></span>
+    <span id="vtxt"></span>
+  </div>
+
+  <div class="acct" id="acct">
+    <button class="btn-ghost" id="login" hidden>Giriş yap</button>
+    <div class="who" id="who" hidden>
+      <span class="av" id="who-av"></span>
+      <span class="nick" id="who-nick"></span>
+      <button class="btn-link" id="logout">Çıkış</button>
+    </div>
+  </div>
+
+  <button class="icon-btn" id="fs" title="Tam ekran (F11)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  </button>
+
+  <div class="win">
+    <button data-win="min" aria-label="Küçült"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
+    <button data-win="max" aria-label="Büyült"><svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
+    <button data-win="close" class="x" aria-label="Kapat"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0 0 10"/></svg></button>
+  </div>
+</header>
+
+<main id="app">
+  <!-- Oyun görünümü tam bu kutuya oturur. -->
+  <div class="stage" id="stage">
+    <div class="stage-msg" id="stage-msg">
+      <div class="spin" id="spin"></div>
+      <p id="stage-txt">Haxball yükleniyor</p>
+      <button class="btn" id="retry" hidden>Yeniden dene</button>
+    </div>
+  </div>
+</main>
+
+<!-- Açılış -->
+<section class="intro" id="intro">
+  <video id="intro-video" src="../assets/intro.mp4" autoplay playsinline></video>
+  <button class="skip" id="skip">Atla</button>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
