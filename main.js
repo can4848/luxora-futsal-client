@@ -348,6 +348,88 @@ ipcMain.on('open:external', (_e, url) => {
   if (/^https:\/\//.test(String(url))) shell.openExternal(url);
 });
 
+// ── Güncelleme ───────────────────────────────────────────────────────────────
+//
+// Yeni sürümler GitHub'daki açık depoya yayınlanıyor. Kendini güncelleyebilen
+// kurulumlar (Windows kurulumu, Linux AppImage) yeni sürümü arka planda indirir;
+// üst çubukta "Yeniden başlat" çıkar, basılmazsa uygulama kapanırken kurulur.
+// Kendini güncelleyemeyenler (Mac — imzasız uygulamayı Apple güncelletmiyor —
+// ve zip/tar.gz kopyalar) yalnızca "yeni sürüm var" deyip indirme sayfasını açar.
+// Maçın ortasında hiçbir şey kendiliğinden yeniden başlamaz.
+
+const RELEASES = 'https://github.com/can4848/luxora-futsal-client/releases/latest';
+const RELEASES_API = 'https://api.github.com/repos/can4848/luxora-futsal-client/releases/latest';
+const UPDATE_EVERY_MS = 4 * 60 * 60e3;
+
+let update = null;   // { kind: 'ready' | 'available', version }
+
+function canSelfUpdate() {
+  if (!app.isPackaged) return false;
+  if (process.platform === 'linux') return !!process.env.APPIMAGE;
+  if (process.platform === 'win32') {
+    // Yalnız kurulumla gelen kopya: yanında kaldırıcısı olur. Zip ya da
+    // taşınabilir sürüm kendini değiştiremez.
+    if (process.env.PORTABLE_EXECUTABLE_DIR) return false;
+    return require('fs').existsSync(path.join(path.dirname(process.execPath), 'Uninstall Luxora Futsal.exe'));
+  }
+  return false;
+}
+
+function setUpdate(u) {
+  update = u;
+  send('update:state', update);
+}
+
+const newer = (a, b) => {
+  const pa = String(a).replace(/^v/, '').split('.').map(Number);
+  const pb = String(b).replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+};
+
+async function checkByApi() {
+  try {
+    const res = await net.fetch(RELEASES_API, { headers: { accept: 'application/vnd.github+json' } });
+    if (!res.ok) return;
+    const r = await res.json();
+    if (r && r.tag_name && newer(r.tag_name, app.getVersion())) {
+      setUpdate({ kind: 'available', version: String(r.tag_name).replace(/^v/, '') });
+    }
+  } catch {}
+}
+
+function initUpdates() {
+  if (!app.isPackaged) return;
+  if (!canSelfUpdate()) {
+    const run = () => { if (!update) checkByApi(); };
+    setTimeout(run, 15e3);
+    setInterval(run, UPDATE_EVERY_MS);
+    return;
+  }
+  const { autoUpdater } = require('electron-updater');
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-downloaded', (i) => setUpdate({ kind: 'ready', version: i.version }));
+  // İndirme başarısız olursa en azından sayfayı göster.
+  autoUpdater.on('error', () => { if (!update) checkByApi(); });
+  const run = () => { if (!update || update.kind !== 'ready') autoUpdater.checkForUpdates().catch(() => {}); };
+  setTimeout(run, 15e3);
+  setInterval(run, UPDATE_EVERY_MS);
+}
+
+ipcMain.handle('update:get', () => update);
+ipcMain.on('update:apply', () => {
+  if (!update) return;
+  if (update.kind === 'ready') {
+    // Sessiz kurulum, bitince uygulama yeniden açılır.
+    setImmediate(() => require('electron-updater').autoUpdater.quitAndInstall(true, true));
+  } else {
+    shell.openExternal(RELEASES);
+  }
+});
+
 // ── Yaşam döngüsü ────────────────────────────────────────────────────────────
 
 // Aynı anda tek pencere. Oyuncu uygulamayı ikinci kez açarsa yenisi kapanır,
@@ -376,6 +458,7 @@ app.whenReady().then(() => {
     ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }])
     : null);
   createWindow();
+  initUpdates();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

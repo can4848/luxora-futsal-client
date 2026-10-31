@@ -194,6 +194,20 @@ function initIntro() {
   setTimeout(() => { if (v.readyState === 0) finish(); }, 6000);
 }
 
+// ── Güncelleme ───────────────────────────────────────────────────────────────
+
+function renderUpdate(u) {
+  const b = $('#upd');
+  if (!u) { b.hidden = true; return; }
+  b.hidden = false;
+  $('#upd-txt').textContent = u.kind === 'ready'
+    ? `v${u.version} hazır · Yeniden başlat`
+    : `Yeni sürüm v${u.version} · İndir`;
+  b.title = u.kind === 'ready'
+    ? 'Güncelleme indirildi. Basınca uygulama yeniden açılır; basmazsan kapatırken kurulur.'
+    : 'İndirme sayfasını tarayıcıda açar.';
+}
+
 // ── Bağlama ──────────────────────────────────────────────────────────────────
 
 function init() {
@@ -205,6 +219,9 @@ function init() {
   $$('[data-win]').forEach((b) => b.addEventListener('click', () => window.lux.win(b.dataset.win)));
   $('#fs').addEventListener('click', () => window.lux.win('full'));
   $('#retry').addEventListener('click', openGame);
+  $('#upd').addEventListener('click', () => window.lux.update.apply());
+  window.lux.update.onState(renderUpdate);
+  window.lux.update.get().then(renderUpdate).catch(() => {});
 
   // Giriş formu oyunun üstündeki katmanda açılıyor (kabuk oraya çizemez).
   $('#login').addEventListener('click', () => window.lux.voice.showLogin());

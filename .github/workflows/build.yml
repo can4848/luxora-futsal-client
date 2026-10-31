@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            target: --win zip
+            target: --win zip nsis
           - os: macos-latest
             target: --mac
           - os: ubuntu-latest
@@ -49,11 +49,16 @@ jobs:
           name: paket-${{ runner.os }}
           if-no-files-found: error
           retention-days: 14
+          # latest*.yml ve .blockmap otomatik güncelleme için: uygulama yeni
+          # sürümü bu dosyalardan öğrenip yalnız değişen parçaları indiriyor.
           path: |
             dist/*.zip
+            dist/*.exe
             dist/*.dmg
             dist/*.AppImage
             dist/*.tar.gz
+            dist/*.blockmap
+            dist/latest*.yml
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

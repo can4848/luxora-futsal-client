@@ -1,6 +1,6 @@
 {
   "name": "luxora-client",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Luxora Futsal odalarında sesli sohbet sağlayan Haxball istemcisi",
   "author": "Luxora Futsal",
   "main": "main.js",
@@ -106,20 +106,30 @@
       "unicode": true
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Luxora Futsal",
       "artifactName": "LuxoraFutsal-Kurulum-${version}.${ext}",
       "language": "1055"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "can4848",
+        "repo": "luxora-futsal-client",
+        "releaseType": "release"
+      }
+    ]
   },
   "license": "MIT",
   "homepage": "https://luxorafutsal.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/can4848/luxora-futsal-client.git"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

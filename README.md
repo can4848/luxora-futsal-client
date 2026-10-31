@@ -17,6 +17,8 @@ orada çalışmadığını söyler ve oynamaya devam edersin.
 - **Mikrofon testi:** kendi sesini dinleyebilir, seviye çubuğuyla duyulup duyulmadığını görebilirsin.
 - Ses paneli oyunun üstünde yüzer, sahadan yer çalmaz; sürüklenip köşeye yapıştırılabilir.
 - Tam ekran (`F11`).
+- Giriş yaptıysan Haxball'un ad ekranı hesabının adıyla kendiliğinden geçilir, doğrudan oda listesi açılır.
+- **Otomatik güncelleme:** yeni sürüm arka planda iner; üst çubukta *Yeniden başlat* çıkar, basmazsan uygulamayı kapatırken kurulur.
 
 ## İndirme
 
@@ -24,10 +26,15 @@ Hazır paketler [Releases](../../releases) sayfasında.
 
 | Platform | Dosya |
 |---|---|
-| Windows | `LuxoraFutsal-<sürüm>-win.zip` — çıkar, `Luxora Futsal.exe`'yi çalıştır |
+| Windows | `LuxoraFutsal-Kurulum-<sürüm>.exe` — tek tık kurulur, kendini günceller |
+| Windows (kurulumsuz) | `LuxoraFutsal-<sürüm>-win.zip` — çıkar, `Luxora Futsal.exe`'yi çalıştır |
 | macOS (Apple çipli) | `LuxoraFutsal-<sürüm>-mac-arm64.dmg` |
 | macOS (Intel) | `LuxoraFutsal-<sürüm>-mac-x64.dmg` |
 | Linux | `LuxoraFutsal-<sürüm>-linux-x86_64.AppImage` ya da `.tar.gz` |
+
+Kendini güncelleyen sürümler: Windows kurulumu ve Linux AppImage. Mac ile
+zip/tar.gz kopyaları yeni sürüm çıkınca üst çubukta *İndir* düğmesi gösterir
+(imzasız Mac uygulamasını Apple kendiliğinden güncelletmiyor).
 
 ### İlk açılış
 

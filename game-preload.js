@@ -382,9 +382,30 @@ function matchRoom(name) {
   return best;
 }
 
+// Giriş yapılmışsa Haxball'un "Choose nickname" ekranı hesabın adıyla
+// kendiliğinden geçilir; oyuncu doğrudan oda listesine düşer. Sesli sohbet
+// zaten oyundaki adın hesabın adıyla aynı olmasını istiyor. Yalnızca açılıştaki
+// ekran geçilir: oda listesine bir kez varıldıktan sonra oyuncu "Change nick"
+// ile adını kendisi değiştirmek isterse ekrana dokunulmaz.
+let pastNickScreen = false;
+function skipNickScreen(d) {
+  if (pastNickScreen || !d) return;
+  if (d.querySelector('.roomlist-view, .game-view')) { pastNickScreen = true; return; }
+  if (!data.me) return;
+  const v = d.querySelector('.choose-nickname-view');
+  const input = v && v.querySelector('[data-hook="input"]');
+  const ok = v && v.querySelector('[data-hook="ok"]');
+  if (!input || !ok) return;
+  input.value = String(data.me).slice(0, Number(input.maxLength) > 0 ? input.maxLength : 25);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  ok.click();
+  pastNickScreen = true;
+}
+
 function detect() {
   hookFrame();
   const d = frameDoc();
+  skipNickScreen(d);
   const inGame = !!(d && d.querySelector('.game-view'));
 
   if (!inGame) {
@@ -802,6 +823,7 @@ async function onLoginSubmit(e) {
   // canlı veriyle de gelecek ama beklemeden devam ediyoruz.
   data.me = r.me.nick;
   try { localStorage.setItem(NICK_KEY, r.me.nick); } catch {}
+  skipNickScreen(frameDoc());
   closeLogin();
   if (where.room) activate();
 }
@@ -1029,6 +1051,7 @@ ipcRenderer.on('voice:room', (_e, d) => {
   // boşluk "çıkış yapıldı" sanılıp mikrofon kapatılıyordu.
   if ('me' in d) data.me = d.me || null;
   if (d.ice) voice.setIce(d.ice);
+  if (!wasMe && data.me) skipNickScreen(frameDoc());
 
   if (where.inRoom && where.name && isLuxoraName(where.name)) {
     const r = matchRoom(where.name);

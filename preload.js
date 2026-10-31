@@ -27,6 +27,12 @@ contextBridge.exposeInMainWorld('lux', {
     onStatus: (fn) => ipcRenderer.on('voice:status', (_e, s) => fn(s)),
   },
 
+  update: {
+    get: () => ipcRenderer.invoke('update:get'),
+    apply: () => ipcRenderer.send('update:apply'),
+    onState: (fn) => ipcRenderer.on('update:state', (_e, s) => fn(s)),
+  },
+
   win: (what) => ipcRenderer.send('win:action', what),
   onWinState: (fn) => ipcRenderer.on('win:state', (_e, s) => fn(s)),
   openExternal: (url) => ipcRenderer.send('open:external', url),

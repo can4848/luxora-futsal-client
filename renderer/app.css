@@ -59,6 +59,15 @@ img, video, svg { display: block; }
 }
 .voice-pill b { color: var(--text); font-weight: 600; }
 
+.upd {
+  display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px;
+  border-radius: 99px; font-size: 12px; font-weight: 600;
+  color: var(--ok); background: rgba(62, 207, 142, .12);
+}
+.upd svg { width: 13px; height: 13px; }
+.upd:hover { background: rgba(62, 207, 142, .2); }
+.upd[hidden] { display: none; }
+
 .acct { display: flex; align-items: center; }
 .who { display: flex; align-items: center; gap: 8px; }
 .av {
